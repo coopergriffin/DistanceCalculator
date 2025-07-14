@@ -312,7 +312,12 @@ class APIProvider {
      * @returns {string} Current API key
      */
     getCurrentAPIKey() {
-        return this.apiKeys.openrouteservice || '';
+        const userKey = this.apiKeys.openrouteservice || '';
+        if (userKey && userKey.trim() !== '') {
+            return userKey;
+        }
+        // Fallback to demo key if no user key is set
+        return 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImM1YmIxOWM4Y2FjNjQ4OGM5Yzk0OTY5YjQ1MzlmZjY3IiwiaCI6Im11cm11cjY0In0=';
     }
 
     /**
