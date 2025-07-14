@@ -313,10 +313,15 @@ class APIProvider {
      */
     getCurrentAPIKey() {
         const userKey = this.apiKeys.openrouteservice || '';
+        console.log('User key found:', userKey ? 'Yes' : 'No');
+        console.log('User key length:', userKey ? userKey.length : 0);
+        
         if (userKey && userKey.trim() !== '') {
+            console.log('Using user key');
             return userKey;
         }
         // Fallback to demo key if no user key is set
+        console.log('Using demo key fallback');
         return 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImM1YmIxOWM4Y2FjNjQ4OGM5Yzk0OTY5YjQ1MzlmZjY3IiwiaCI6Im11cm11cjY0In0=';
     }
 
@@ -388,6 +393,24 @@ class OpenRouteServiceProvider extends APIProvider {
     }
 
     /**
+     * Get current API key with demo fallback
+     * @returns {string} Current API key
+     */
+    getCurrentAPIKey() {
+        const userKey = this.apiKeys.openrouteservice || '';
+        console.log('OpenRouteServiceProvider - User key found:', userKey ? 'Yes' : 'No');
+        console.log('OpenRouteServiceProvider - User key length:', userKey ? userKey.length : 0);
+        
+        if (userKey && userKey.trim() !== '') {
+            console.log('OpenRouteServiceProvider - Using user key');
+            return userKey;
+        }
+        // Fallback to demo key if no user key is set
+        console.log('OpenRouteServiceProvider - Using demo key fallback');
+        return 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImM1YmIxOWM4Y2FjNjQ4OGM5Yzk0OTY5YjQ1MzlmZjY3IiwiaCI6Im11cm11cjY0In0=';
+    }
+
+    /**
      * Geocode address using Nominatim (free, CORS-friendly)
      * @param {string} query - Address to geocode
      * @param {string} country - Country code (default: CA)
@@ -438,6 +461,9 @@ class OpenRouteServiceProvider extends APIProvider {
      */
     async calculateDistance(origin, destination) {
         const apiKey = this.getCurrentAPIKey();
+        console.log('API Key being used:', apiKey ? 'Key found' : 'No key');
+        console.log('API Key length:', apiKey ? apiKey.length : 0);
+        
         if (!apiKey) {
             throw new Error('OpenRouteService API key is required');
         }
