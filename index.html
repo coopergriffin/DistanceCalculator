@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distance Calculator - Driving Reimbursement Tool</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚗 Distance Calculator</h1>
+            <p>Calculate driving distances and reimbursement amounts for multiple client visits</p>
+        </header>
+
+        <!-- API Configuration Section -->
+        <div class="api-section">
+            <h2>API Configuration</h2>
+            <div class="api-config">
+                <div class="provider-info" id="providerInfo">
+                    <strong>OpenRouteService + Nominatim</strong><br>
+                    Free driving distance calculation (OpenRouteService) with address lookup (Nominatim)<br>
+                    Free tier: 2,000 routing requests/day (OpenRouteService), unlimited geocoding (Nominatim)<br>
+                    Geocoding: Nominatim (free, CORS-friendly) | Routing: OpenRouteService (avoids tolls)
+                </div>
+
+                <div class="api-key-section">
+                    <label for="apiKey">API Key:</label>
+                    <div class="api-key-input-group">
+                        <input type="text" id="apiKey" placeholder="Enter your OpenRouteService API key">
+                        <button id="toggleApiKeyVisibility" class="secondary-btn" title="Show/Hide API key">👁️</button>
+                        <button id="clearApiKey" class="secondary-btn">Clear</button>
+                    </div>
+                    <small class="api-key-info">
+                        <strong>Demo mode:</strong> Using default API key. 
+                        <a href="https://openrouteservice.org/dev/#/signup" target="_blank">Get your own free key</a> for unlimited usage (2,000 requests/day).
+                    </small>
+                </div>
+                <div id="rateLimitInfo" style="margin: 8px 0 0 0; display: none;"></div>
+
+                <div class="api-links">
+                    <p><strong>Get API Key (Free):</strong></p>
+                    <ul>
+                        <li><a href="https://openrouteservice.org/dev/#/signup" target="_blank">OpenRouteService (Free - 2,000 routing requests/day)</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Section -->
+        <div class="main-content">
+            <div class="input-section">
+                <h2>Address Information</h2>
+                
+                <div class="form-group">
+                    <label for="homeAddress">Your Home Address:</label>
+                    <div class="address-input-group">
+                        <input type="text" id="homeAddress" placeholder="Enter your home address or postal code (e.g., M5V 3A8 or 123 Main St, Toronto, ON)">
+                        <button id="verifyHomeAddress" class="secondary-btn">Verify</button>
+                        <button id="confirmHomeAddress" class="primary-btn">Confirm Home</button>
+                    </div>
+                    <small>Type the address, click "Verify" to see suggestions, select one, then click "Confirm Home".</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="intermediateAddress">Stop Address:</label>
+                    <div class="address-input-group">
+                        <input type="text" id="intermediateAddress" placeholder="Enter stop address (e.g., gas station, restaurant)">
+                        <button id="verifyStopAddress" class="secondary-btn">Verify</button>
+                        <button id="addIntermediateStop" class="primary-btn">Add Stop</button>
+                    </div>
+                    <small>Type the address, click "Verify" to see suggestions, select one, then click "Add Stop".</small>
+                </div>
+                
+                <div class="intermediate-list">
+                    <h4>Current Trip Stops (<span id="intermediateCount">0</span>)</h4>
+                    <div id="intermediateList" class="intermediate-addresses"></div>
+                </div>
+
+                <div class="form-group">
+                    <div class="end-trip-section">
+                        <button id="addClient" class="primary-btn large">Add Trip</button>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="notReturnHome">
+                            <span class="checkmark"></span>
+                            Not returning home
+                        </label>
+                    </div>
+                    <small>Click to add the current trip. Check "Not returning home" if the trip ends at the last stop.</small>
+                </div>
+
+                <div class="client-list">
+                    <h3>Trips (<span id="clientCount">0</span>)</h3>
+                    <div id="clientList" class="client-addresses"></div>
+                </div>
+
+                <div class="form-group">
+                    <label for="pricePerKm">Price per Kilometer (CAD):</label>
+                    <input type="text" id="pricePerKm" value="0.49" pattern="[0-9]*\.?[0-9]+" placeholder="0.49">
+                    <small>Default: $0.49 CAD/km. Enter decimals like 0.49, 0.65, etc.</small>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-section">
+                <button id="calculate" class="primary-btn large">Calculate Distances</button>
+                <button id="export" class="secondary-btn">Export to CSV</button>
+                <button id="clearAll" class="secondary-btn">Clear All Data</button>
+                <button id="debug" class="debug-btn">Debug Info</button>
+            </div>
+
+            <!-- Progress Indicator -->
+            <div id="progressContainer" class="progress-container" style="display: none;">
+                <div class="progress-bar">
+                    <div id="progress" class="progress-fill"></div>
+                </div>
+                <p>Calculating distances...</p>
+            </div>
+
+            <!-- Error Messages -->
+            <div id="error" class="error-message" style="display: none;"></div>
+
+            <!-- Results Section -->
+            <div id="results" class="results-section"></div>
+        </div>
+
+        <!-- Help Section -->
+        <div class="help-section">
+            <h2>How to Use</h2>
+            <ol>
+                <li><strong>Get an API Key:</strong> Sign up for a free OpenRouteService API key (no credit card needed, 2,000 routing requests/day).</li>
+                <li><strong>Enter your home address:</strong> Start typing and select from the suggestions.</li>
+                <li><strong>Add stops (optional):</strong> Enter stop addresses and click "Add Stop" for each.</li>
+                <li><strong>Add trip:</strong> Click "Add Trip" to save the current trip. By default, trips return home. Check "Not returning home" if the trip ends at the last stop.</li>
+                <li><strong>Include/exclude trips:</strong> Use the checkboxes next to each trip to include or exclude them from calculations. Uncheck trips for different employees or scenarios.</li>
+                <li><strong>Repeat:</strong> Add more trips as needed.</li>
+                <li><strong>Calculate:</strong> Click "Calculate Distances" to get distances and reimbursement amounts.</li>
+                <li><strong>Export:</strong> Download results as CSV for your records.</li>
+            </ol>
+
+            <h3>Trip Workflow Example</h3>
+            <ul>
+                <li><strong>Trip 1:</strong> Home → Gas Station → Client A → Home</li>
+                <li><strong>Trip 2:</strong> Home → Lunch Stop → Client B → Home</li>
+                <li><strong>Trip 3:</strong> Home → Client C → Home</li>
+            </ul>
+
+            <h3>Tips for Accurate Results</h3>
+            <ul>
+                <li><strong>Use postal codes</strong> for Canadian addresses when possible—they are more accurate and consistent.</li>
+                <li>Include city and province (e.g., "Toronto, ON").</li>
+                <li>If an address isn't found, try a different format or use the postal code.</li>
+                <li>All distances are calculated as round trips unless "Not returning home" is checked.</li>
+                <li>You can edit distances manually if needed after calculation.</li>
+            </ul>
+
+            <h3>About the Providers</h3>
+            <ul>
+                <li><strong>Geocoding:</strong> Nominatim (OpenStreetMap) — free, no API key needed, CORS-friendly, unlimited usage for reasonable personal use.</li>
+                <li><strong>Routing:</strong> OpenRouteService — free with API key, accurate driving distances, avoids tolls by default (2,000 requests/day).</li>
+            </ul>
+
+            <h3>Quick Reference</h3>
+            <ul>
+                <li><strong>Price per km:</strong> Default is $0.49 CAD/km (editable).</li>
+                <li><strong>No Return Home:</strong> Check the box if your trip ends at the last stop instead of returning home.</li>
+                <li><strong>Manual Edits:</strong> You can manually adjust distances in the results table if needed.</li>
+                <li><strong>Export:</strong> Download your results as a CSV for easy record-keeping.</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>Developed by <a href="YOUR_GITHUB_URL_HERE" target="_blank" rel="noopener noreferrer">Cooper Griffin</a></p>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="api-providers.js"></script>
+    <script src="app.js"></script>
+</body>
+</html> 
