@@ -460,13 +460,15 @@ class OpenRouteServiceProvider extends APIProvider {
         // Try with increasing radiuses if 350m fails
         const radiiToTry = [350, 1000, 2000];
         let lastError = null;
-        for (let radius of radiiToTry) {
+        let originRadius = 350;
+        let destRadius = 350;
+        for (let attempt = 0; attempt < radiiToTry.length; attempt++) {
             try {
                 const requestBody = {
                     coordinates: [origin, destination],
                     format: 'json',
                     units: 'km',
-                    radiuses: [radius, radius]
+                    radiuses: [originRadius, destRadius]
                 };
                 const response = await fetch(`https://api.openrouteservice.org/v2/directions/driving-car?api_key=${apiKey}`, {
                     method: 'POST',
@@ -490,8 +492,24 @@ class OpenRouteServiceProvider extends APIProvider {
                     console.warn(`${context}OpenRouteService API error:`, response.status, errorText);
                     // If this is a 404 with a 350m radius error, try next radius
                     if (response.status === 404 && errorText.includes('within a radius of 350.0 meters')) {
+                        // Parse which coordinate failed
+                        let coordMatch = errorText.match(/coordinate (\d):/);
+                        let coordIdx = coordMatch ? parseInt(coordMatch[1], 10) : null;
+                        let which = coordIdx === 0 ? 'origin' : (coordIdx === 1 ? 'destination' : 'unknown');
+                        // Only increase the radius for the problematic coordinate
+                        if (attempt + 1 < radiiToTry.length && coordIdx !== null) {
+                            let nextRadius = radiiToTry[attempt + 1];
+                            if (coordIdx === 0) {
+                                originRadius = nextRadius;
+                            } else if (coordIdx === 1) {
+                                destRadius = nextRadius;
+                            }
+                            console.warn(`Retrying with radius ${nextRadius}m for ${which} (coordinate ${coordIdx})...`);
+                            lastError = errorText;
+                            continue; // Try next radius
+                        }
                         lastError = errorText;
-                        continue; // Try next radius
+                        continue; // If no more radii, will fallback
                     }
                     throw new Error(`OpenRouteService routing failed: ${response.status} - ${errorText}`);
                 }
