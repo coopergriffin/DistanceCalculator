@@ -25,7 +25,7 @@ class DistanceCalculator {
         this.trips = []; // Array of trip objects: {stops: [], notReturnHome: false, tripNumber: 1}
         this.currentTripStops = []; // Stops for the current trip being built
         this.notReturnHome = false; // Whether current trip should not return home
-        this.pricePerKm = 0.49; // Default CAD per km
+        this.pricePerKm = 0.46; // Default CAD per km
         this.apiManager = apiManager; // Use the global API manager
         
         this.loadData();
@@ -256,17 +256,23 @@ class DistanceCalculator {
         // Show dropdown with suggestions
         const showDropdown = (suggestions) => {
             if (!dropdown) createDropdown();
-            
             if (suggestions.length === 0) {
                 dropdown.style.display = 'none';
-                this.showError('No addresses found. Please try adding more details (city, province, postal code).');
+                // Show error near the input
+                const errorDiv = input.parentNode.querySelector('.input-error') || document.createElement('div');
+                errorDiv.className = 'input-error';
+                errorDiv.style.color = '#b94a48';
+                errorDiv.style.marginTop = '4px';
+                errorDiv.textContent = 'No addresses found. Please try adding more details (city, province, postal code).';
+                input.parentNode.appendChild(errorDiv);
                 return;
             }
-
+            // Remove any previous error
+            const prevError = input.parentNode.querySelector('.input-error');
+            if (prevError) prevError.remove();
             dropdown.innerHTML = '';
             dropdown.style.display = 'block';
             dropdown.style.zIndex = '9999';
-
             suggestions.forEach((suggestion, index) => {
                 const item = document.createElement('div');
                 item.className = 'autocomplete-item';
@@ -276,21 +282,21 @@ class DistanceCalculator {
                     cursor: pointer;
                     border-bottom: 1px solid #eee;
                 `;
-
                 item.addEventListener('mouseenter', () => {
                     item.style.backgroundColor = '#f0f0f0';
                 });
-
                 item.addEventListener('mouseleave', () => {
                     item.style.backgroundColor = 'white';
                 });
-
                 item.addEventListener('click', () => {
-                    // Set the input value to the selected address
+                    // Set the input value and store coordinates as data attribute
                     input.value = suggestion.address;
+                    input.dataset.coordinates = JSON.stringify(suggestion.coordinates);
                     dropdown.style.display = 'none';
+                    // Remove any previous error
+                    const prevError = input.parentNode.querySelector('.input-error');
+                    if (prevError) prevError.remove();
                 });
-
                 dropdown.appendChild(item);
             });
         };
@@ -490,61 +496,51 @@ class DistanceCalculator {
     async addIntermediateStop() {
         const input = document.getElementById('intermediateAddress');
         const address = input.value.trim();
-        
+        let coordinates = null;
+        if (input.dataset.coordinates) {
+            try {
+                coordinates = JSON.parse(input.dataset.coordinates);
+            } catch {}
+        }
         if (!address) {
-            this.showError('Please enter a stop address.');
+            this.showError('Please enter a stop address.', input);
             return;
         }
-
-        // Check if this address is already in the current trip
-        if (this.currentTripStops.includes(address)) {
-            this.showError('This stop is already in the current trip.');
+        // Check for duplicate by address and coordinates
+        if (this.currentTripStops.some(stop => stop.address === address && JSON.stringify(stop.coordinates) === JSON.stringify(coordinates))) {
+            this.showError('This stop is already in the current trip.', input);
             return;
         }
-
-        // For addresses from autocomplete (which are already verified), skip validation
-        // For manually typed addresses, do basic validation
         let finalAddress = address;
-        let shouldValidate = true;
-
-        // If the address looks like it came from autocomplete (has full details), skip validation
-        if (address.includes(',') && (address.includes('ON') || address.includes('Ontario') || address.includes('CA'))) {
-            shouldValidate = false;
-        }
-
+        let finalCoordinates = coordinates;
+        let shouldValidate = !coordinates;
         if (shouldValidate) {
-            // Validate the address first
             this.showLoading(true);
             try {
                 const validation = await this.apiManager.validateAddress(address);
-                
                 if (!validation.isValid) {
-                    this.showValidationErrors(validation.errors, validation.warnings);
+                    this.showValidationErrors(validation.errors, validation.warnings, input);
                     return;
                 }
-
-                // Use the verified address if available
                 finalAddress = validation.verifiedAddress || address;
-                
-                // Show success message if there were warnings
+                finalCoordinates = validation.coordinates;
                 if (validation.warnings.length > 0) {
                     this.showWarning(`Stop added successfully. Note: ${validation.warnings.join(', ')}`);
                 }
             } catch (error) {
                 console.error('Address validation error:', error);
-                this.showError('Address validation failed. Please try again.');
+                this.showError('Address validation failed. Please try again.', input);
                 return;
             } finally {
                 this.showLoading(false);
             }
         }
-
-        // Add the stop
-        this.currentTripStops.push(finalAddress);
+        // Add the stop as an object
+        this.currentTripStops.push({ address: finalAddress, coordinates: finalCoordinates });
         this.saveData();
         this.updateUI();
         input.value = '';
-        
+        delete input.dataset.coordinates;
         this.showWarning('Stop added successfully!');
     }
 
@@ -831,33 +827,33 @@ class DistanceCalculator {
      */
     async calculateSingleDistance(origin, destination) {
         try {
-            // First geocode both addresses
-            const [originResults, destResults] = await Promise.all([
-                this.apiManager.geocodeAddress(origin, 'CA'),
-                this.apiManager.geocodeAddress(destination, 'CA')
-            ]);
-
-            if (originResults.length === 0) {
-                throw new Error(`Could not find coordinates for origin: ${origin}`);
+            let originCoords = null, destCoords = null;
+            if (typeof origin === 'object' && origin.coordinates) {
+                originCoords = origin.coordinates;
             }
-
-            if (destResults.length === 0) {
-                throw new Error(`Could not find coordinates for destination: ${destination}`);
+            if (typeof destination === 'object' && destination.coordinates) {
+                destCoords = destination.coordinates;
             }
-
-            // Use the first (most relevant) result for each
-            const originCoords = originResults[0].coordinates;
-            const destCoords = destResults[0].coordinates;
-
-            // Calculate route
+            if (!originCoords) {
+                const originResults = await this.apiManager.geocodeAddress(typeof origin === 'object' ? origin.address : origin, 'CA');
+                if (originResults.length === 0) {
+                    throw new Error(`Could not find coordinates for origin: ${typeof origin === 'object' ? origin.address : origin}`);
+                }
+                originCoords = originResults[0].coordinates;
+            }
+            if (!destCoords) {
+                const destResults = await this.apiManager.geocodeAddress(typeof destination === 'object' ? destination.address : destination, 'CA');
+                if (destResults.length === 0) {
+                    throw new Error(`Could not find coordinates for destination: ${typeof destination === 'object' ? destination.address : destination}`);
+                }
+                destCoords = destResults[0].coordinates;
+            }
             const routeResult = await this.apiManager.calculateDistance(originCoords, destCoords);
-            
             return {
                 distance: routeResult.distance,
                 duration: routeResult.duration,
                 route: routeResult.route
             };
-
         } catch (error) {
             console.error('Distance calculation error:', error);
             throw error;
@@ -1166,7 +1162,7 @@ class DistanceCalculator {
             this.homeAddress = '';
             this.trips = [];
             this.currentTripStops = []; // Clear intermediate stops
-            this.pricePerKm = 0.49;
+            this.pricePerKm = 0.46;
             this.saveData();
             this.updateUI();
             this.clearResults();
@@ -1200,14 +1196,22 @@ class DistanceCalculator {
      * Show error message
      * @param {string} message - Error message to display
      */
-    showError(message) {
-        const errorDiv = document.getElementById('error');
-        errorDiv.textContent = message;
-        errorDiv.style.display = 'block';
-        
-        setTimeout(() => {
-            errorDiv.style.display = 'none';
-        }, 5000);
+    showError(message, input) {
+        if (input) {
+            let errorDiv = input.parentNode.querySelector('.input-error') || document.createElement('div');
+            errorDiv.className = 'input-error';
+            errorDiv.style.color = '#b94a48';
+            errorDiv.style.marginTop = '4px';
+            errorDiv.textContent = message;
+            input.parentNode.appendChild(errorDiv);
+        } else {
+            const errorDiv = document.getElementById('error');
+            errorDiv.innerHTML = `<div style="color: #b94a48; background: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">${message}</div>`;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
     }
 
     /**
@@ -1300,7 +1304,7 @@ class DistanceCalculator {
                 const item = document.createElement('div');
                 item.className = 'intermediate-item';
                 item.innerHTML = `
-                    <span>${address}</span>
+                    <span>${address.address}</span>
                     <button onclick="calculator.removeIntermediateStop(${index})" class="remove-btn">×</button>
                 `;
                 intermediateList.appendChild(item);
