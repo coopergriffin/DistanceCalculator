@@ -117,28 +117,21 @@ class DistanceCalculator {
         });
 
         // Price per km input - handle decimal input properly
-        document.getElementById('pricePerKm').addEventListener('input', (e) => {
+        const priceInput = document.getElementById('pricePerKm');
+        priceInput.addEventListener('input', (e) => {
+            // Allow user to type freely, do not update UI or save yet
+            // Only allow numbers and one decimal point (handled by input type=number)
+        });
+        priceInput.addEventListener('blur', (e) => {
             let value = e.target.value;
-            
-            // Allow typing decimal point
-            if (value === '.' || value === '0.') {
-                e.target.value = value;
-                return;
-            }
-            
-            // Only allow numbers and one decimal point
-            value = value.replace(/[^0-9.]/g, '');
-            
-            // Ensure only one decimal point
-            const parts = value.split('.');
-            if (parts.length > 2) {
-                value = parts[0] + '.' + parts.slice(1).join('');
-            }
-            
-            e.target.value = value;
             this.pricePerKm = parseFloat(value) || 0;
             this.saveData();
             this.updateUI();
+        });
+        priceInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.target.blur(); // Triggers blur event to save
+            }
         });
 
         // Calculate button
