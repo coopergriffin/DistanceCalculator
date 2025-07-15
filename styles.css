@@ -1102,3 +1102,17 @@ header p {
     font-weight: 600;
     border-radius: 4px;
 } 
+
+.fallback-row {
+    background: #ffe5b4 !important;
+    color: #b26a00 !important;
+}
+.fallback-warning {
+    display: inline-block;
+    margin-left: 8px;
+    font-weight: bold;
+    color: #b26a00;
+    background: none;
+    border: none;
+    vertical-align: middle;
+} 

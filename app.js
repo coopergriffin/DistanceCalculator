@@ -845,23 +845,31 @@ class DistanceCalculator {
                     const fromAddress = tripRoute[i];
                     const toAddress = tripRoute[i + 1];
                     
+                    // Leg description for error reporting
+                    let legDescription = '';
+                    if (i === 0) {
+                        legDescription = 'Home → First Stop';
+                    } else if (i === tripRoute.length - 2) {
+                        legDescription = 'Last Stop → Home';
+                    } else {
+                        legDescription = `Stop ${i} → Stop ${i + 1}`;
+                    }
                     try {
-                        const result = await this.calculateSingleDistance(fromAddress, toAddress);
-                        
+                        const result = await this.calculateSingleDistance(fromAddress, toAddress, trip.tripNumber, legDescription);
                         results.push({
                             tripNumber: trip.tripNumber,
                             from: fromAddress,
                             to: toAddress,
                             distance: result.distance,
                             duration: result.duration,
-                            reimbursement: result.distance * this.pricePerKm
+                            reimbursement: result.distance * this.pricePerKm,
+                            ...(result.fallback ? { fallback: true } : {})
                         });
                         
                         totalDistance += result.distance;
                         totalReimbursement += result.distance * this.pricePerKm;
                         
                     } catch (error) {
-                        console.error(`Error calculating distance from ${fromAddress} to ${toAddress}:`, error);
                         results.push({
                             tripNumber: trip.tripNumber,
                             from: fromAddress,
@@ -869,7 +877,7 @@ class DistanceCalculator {
                             distance: 0,
                             duration: 0,
                             reimbursement: 0,
-                            error: error.message
+                            error: `Trip ${trip.tripNumber}, ${legDescription}: ${error.message}`
                         });
                     }
                 }
@@ -946,11 +954,15 @@ class DistanceCalculator {
      * Calculate distance between two addresses
      * @param {string} origin - Origin address
      * @param {string} destination - Destination address
+     * @param {number} tripNumber - Trip number for error reporting
+     * @param {string} legDescription - Leg description for error reporting
      * @returns {Object} Distance and duration information
      */
-    async calculateSingleDistance(origin, destination) {
+    async calculateSingleDistance(origin, destination, tripNumber = null, legDescription = null) {
         try {
             let originCoords = null, destCoords = null;
+            let originAddress = typeof origin === 'object' && origin.address ? origin.address : origin;
+            let destAddress = typeof destination === 'object' && destination.address ? destination.address : destination;
             if (typeof origin === 'object' && origin.coordinates) {
                 originCoords = origin.coordinates;
             }
@@ -958,27 +970,39 @@ class DistanceCalculator {
                 destCoords = destination.coordinates;
             }
             if (!originCoords) {
-                const originResults = await this.apiManager.geocodeAddress(typeof origin === 'object' ? origin.address : origin, 'CA');
+                const originResults = await this.apiManager.geocodeAddress(originAddress, 'CA');
                 if (originResults.length === 0) {
-                    throw new Error(`Could not find coordinates for origin: ${typeof origin === 'object' ? origin.address : origin}`);
+                    throw new Error(`Could not find coordinates for origin: ${originAddress}`);
                 }
                 originCoords = originResults[0].coordinates;
             }
             if (!destCoords) {
-                const destResults = await this.apiManager.geocodeAddress(typeof destination === 'object' ? destination.address : destination, 'CA');
+                const destResults = await this.apiManager.geocodeAddress(destAddress, 'CA');
                 if (destResults.length === 0) {
-                    throw new Error(`Could not find coordinates for destination: ${typeof destination === 'object' ? destination.address : destination}`);
+                    throw new Error(`Could not find coordinates for destination: ${destAddress}`);
                 }
                 destCoords = destResults[0].coordinates;
             }
-            const routeResult = await this.apiManager.calculateDistance(originCoords, destCoords);
+            // Pass address info for error logging
+            const routeResult = await this.apiManager.calculateDistance(originCoords, destCoords, {
+                tripNumber,
+                legDescription,
+                originAddress,
+                destAddress
+            });
             return {
                 distance: routeResult.distance,
                 duration: routeResult.duration,
-                route: routeResult.route
+                route: routeResult.route,
+                ...(routeResult.fallback ? { fallback: true } : {})
             };
         } catch (error) {
-            console.error('Distance calculation error:', error);
+            // Add trip/leg/address info to error log
+            let extra = '';
+            if (tripNumber !== null && legDescription) {
+                extra = `[Trip ${tripNumber}, Leg: ${legDescription}]`;
+            }
+            console.error(`${extra} Distance calculation error:`, error);
             throw error;
         }
     }
@@ -1053,15 +1077,17 @@ class DistanceCalculator {
                             fallbackClass = 'fallback-distance';
                         }
                         return `
-                            <tr class="${result.error ? 'error-row' : ''} ${index === 0 ? 'trip-start' : ''}" data-index="${results.indexOf(result)}" data-trip="${result.tripNumber}">
+                            <tr class="${result.error ? 'error-row' : ''} ${result.fallback ? 'fallback-row' : ''} ${index === 0 ? 'trip-start' : ''}" data-index="${results.indexOf(result)}" data-trip="${result.tripNumber}">
                                 <td>${index === 0 ? `<strong>Trip ${result.tripNumber}</strong>` : ''}</td>
                                 <td>${legDescription}</td>
                                 <td>${typeof result.from === 'object' && result.from.address ? result.from.address : result.from}</td>
                                 <td>${typeof result.to === 'object' && result.to.address ? result.to.address : result.to}</td>
-                                <td class="${fallbackClass}">${isEditable ? 
-                                        `<input type="number" class="distance-input" value="${result.distance.toFixed(1)}" step="0.1" min="0" data-index="${results.indexOf(result)}">` : 
-                                        distance
-                                    } ${fallbackWarning}</td>
+                                <td class="${fallbackClass}">
+                                    ${isEditable ? `<input type="number" class="distance-input" value="${result.distance.toFixed(1)}" step="0.1" min="0" data-index="${results.indexOf(result)}">` : distance}
+                                    ${result.fallback ? `<span class="fallback-warning" title="No driving route found. This is a straight-line distance. Try a more specific address, or enter the distance manually." style="color:#e67e22;cursor:help;font-size:1.1em;vertical-align:middle;margin-left:6px;">
+                                        ⚠️ Fallback: Straight-line distance used.<br><span style='font-size:0.95em;font-weight:normal;'>Try a more specific address, or enter the distance manually.</span>
+                                    </span>` : ''}
+                                </td>
                                 <td><span class="leg-duration">${duration}</span></td>
                                 <td class="reimbursement-cell">${reimbursement}</td>
                                 <td>
@@ -1581,6 +1607,38 @@ class DistanceCalculator {
             }
         });
         
+        // Update per-trip total rows
+        const tripGroups = {};
+        this.currentResults.forEach(result => {
+            if (!tripGroups[result.tripNumber]) {
+                tripGroups[result.tripNumber] = [];
+            }
+            tripGroups[result.tripNumber].push(result);
+        });
+        // Update all trip total rows
+        const allTripTotalRows = document.querySelectorAll('.results-table tbody tr.trip-total');
+        Object.keys(tripGroups).forEach(tripNumber => {
+            const tripResults = tripGroups[tripNumber];
+            const tripTotalDistance = tripResults.reduce((sum, result) => sum + (result.error ? 0 : result.distance), 0);
+            const tripTotalDuration = tripResults.reduce((sum, result) => sum + (result.error ? 0 : result.duration), 0);
+            const tripTotalReimbursement = tripResults.reduce((sum, result) => sum + (result.error ? 0 : result.reimbursement), 0);
+            // Find the correct trip total row for this trip
+            allTripTotalRows.forEach(row => {
+                const firstCell = row.querySelector('td:first-child strong');
+                if (firstCell && firstCell.textContent.includes(`Trip ${tripNumber} Total`)) {
+                    const cells = row.querySelectorAll('td');
+                    if (cells.length >= 7) {
+                        // Distance
+                        cells[4].innerHTML = `<strong>${tripTotalDistance.toFixed(1)} km</strong>`;
+                        // Duration
+                        cells[5].innerHTML = `<strong><span class="trip-total-duration">${this.formatDuration(tripTotalDuration)}</span></strong>`;
+                        // Reimbursement
+                        cells[6].innerHTML = `<strong>$${tripTotalReimbursement.toFixed(2)}</strong>`;
+                    }
+                }
+            });
+        });
+        
         // Store updated totals
         this.currentTotalDistance = totalDistance;
         this.currentTotalReimbursement = totalReimbursement;
@@ -1675,15 +1733,25 @@ class DistanceCalculator {
                 const fromAddress = tripRoute[i];
                 const toAddress = tripRoute[i + 1];
                 
+                // Leg description for error reporting
+                let legDescription = '';
+                if (i === 0) {
+                    legDescription = 'Home → First Stop';
+                } else if (i === tripRoute.length - 2) {
+                    legDescription = 'Last Stop → Home';
+                } else {
+                    legDescription = `Stop ${i} → Stop ${i + 1}`;
+                }
                 try {
-                    const result = await this.calculateSingleDistance(fromAddress, toAddress);
+                    const result = await this.calculateSingleDistance(fromAddress, toAddress, trip.tripNumber, legDescription);
                     newResults.push({
                         tripNumber: trip.tripNumber,
                         from: fromAddress,
                         to: toAddress,
                         distance: result.distance,
                         duration: result.duration,
-                        reimbursement: result.distance * this.pricePerKm
+                        reimbursement: result.distance * this.pricePerKm,
+                        ...(result.fallback ? { fallback: true } : {})
                     });
                 } catch (error) {
                     console.error(`Error calculating distance from ${fromAddress} to ${toAddress}:`, error);

@@ -398,15 +398,11 @@ class OpenRouteServiceProvider extends APIProvider {
      */
     getCurrentAPIKey() {
         const userKey = this.apiKeys.openrouteservice || '';
-        console.log('OpenRouteServiceProvider - User key found:', userKey ? 'Yes' : 'No');
-        console.log('OpenRouteServiceProvider - User key length:', userKey ? userKey.length : 0);
-        
+        // Removed noisy logs about user key presence and length
         if (userKey && userKey.trim() !== '') {
-            console.log('OpenRouteServiceProvider - Using user key');
             return userKey;
         }
         // Fallback to demo key if no user key is set
-        console.log('OpenRouteServiceProvider - Using demo key fallback');
         return 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImM1YmIxOWM4Y2FjNjQ4OGM5Yzk0OTY5YjQ1MzlmZjY3IiwiaCI6Im11cm11cjY0In0=';
     }
 
@@ -418,20 +414,14 @@ class OpenRouteServiceProvider extends APIProvider {
      */
     async geocodeAddress(query, country = 'CA') {
         try {
-            // Use Nominatim for geocoding (free, CORS-friendly)
             const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=${country.toLowerCase()}&limit=10&addressdetails=1`);
-            
             if (!response.ok) {
                 throw new Error(`Nominatim geocoding failed: ${response.status}`);
             }
-
             const data = await response.json();
-            
             if (!data || data.length === 0) {
                 return [];
             }
-
-            // Filter and format results
             const results = data
                 .filter(item => item.display_name && item.lat && item.lon)
                 .map(item => ({
@@ -442,10 +432,12 @@ class OpenRouteServiceProvider extends APIProvider {
                 .filter((result, index, self) => 
                     index === self.findIndex(r => r.address === result.address)
                 );
-
             return results;
         } catch (error) {
-            console.error('Nominatim geocoding error:', error);
+            // Only log unexpected geocoding errors
+            if (error && error.name !== 'TypeError') {
+                console.warn('Nominatim geocoding error:', error);
+            }
             throw error;
         }
     }
@@ -457,89 +449,95 @@ class OpenRouteServiceProvider extends APIProvider {
      * Avoids tolls and ignores traffic for consistent base distance
      * @param {Array} origin - [longitude, latitude] of origin
      * @param {Array} destination - [longitude, latitude] of destination
+     * @param {Object} info - Optional: {tripNumber, legDescription, originAddress, destAddress}
      * @returns {Object} Distance and duration information
      */
-    async calculateDistance(origin, destination) {
+    async calculateDistance(origin, destination, info = {}) {
         const apiKey = this.getCurrentAPIKey();
-        console.log('API Key being used:', apiKey ? 'Key found' : 'No key');
-        console.log('API Key length:', apiKey ? apiKey.length : 0);
-        
         if (!apiKey) {
             throw new Error('OpenRouteService API key is required');
         }
-
-        try {
-            const requestBody = {
-                coordinates: [origin, destination],
-                format: 'json',
-                units: 'km'
-            };
-            
-            const response = await fetch(`https://api.openrouteservice.org/v2/directions/driving-car?api_key=${apiKey}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(requestBody)
-            });
-
-            // Debug: log all response headers
-            console.log('All response headers:', Array.from(response.headers.entries()));
-
-            // Store rate limit info if present
-            this.ratelimitLimit = response.headers.get('x-ratelimit-limit');
-            this.ratelimitRemaining = response.headers.get('x-ratelimit-remaining');
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error('OpenRouteService API error response:', errorText);
-                throw new Error(`OpenRouteService routing failed: ${response.status} - ${errorText}`);
+        // Try with increasing radiuses if 350m fails
+        const radiiToTry = [350, 1000, 2000];
+        let lastError = null;
+        for (let radius of radiiToTry) {
+            try {
+                const requestBody = {
+                    coordinates: [origin, destination],
+                    format: 'json',
+                    units: 'km',
+                    radiuses: [radius, radius]
+                };
+                const response = await fetch(`https://api.openrouteservice.org/v2/directions/driving-car?api_key=${apiKey}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                this.ratelimitLimit = response.headers.get('x-ratelimit-limit');
+                this.ratelimitRemaining = response.headers.get('x-ratelimit-remaining');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    // Build a detailed error log
+                    let context = '';
+                    if (info && (info.tripNumber || info.legDescription)) {
+                        context += `[Trip ${info.tripNumber || '?'}${info.legDescription ? ', Leg: ' + info.legDescription : ''}]\n`;
+                    }
+                    if (info && (info.originAddress || info.destAddress)) {
+                        context += `Origin: ${info.originAddress || JSON.stringify(origin)}\nDestination: ${info.destAddress || JSON.stringify(destination)}\n`;
+                    }
+                    console.warn(`${context}OpenRouteService API error:`, response.status, errorText);
+                    // If this is a 404 with a 350m radius error, try next radius
+                    if (response.status === 404 && errorText.includes('within a radius of 350.0 meters')) {
+                        lastError = errorText;
+                        continue; // Try next radius
+                    }
+                    throw new Error(`OpenRouteService routing failed: ${response.status} - ${errorText}`);
+                }
+                const data = await response.json();
+                if (!data.routes || data.routes.length === 0) {
+                    throw new Error('No route found');
+                }
+                const route = data.routes[0];
+                let distance;
+                if (route.summary.distance > 1000) {
+                    distance = route.summary.distance / 1000;
+                } else {
+                    distance = route.summary.distance;
+                }
+                const duration = route.summary.duration / 60;
+                return {
+                    distance: Math.round(distance * 100) / 100,
+                    duration: Math.round(duration * 100) / 100,
+                    route: route.geometry ? route.geometry.coordinates : [origin, destination]
+                };
+            } catch (error) {
+                // Only log unexpected errors, not expected fallback
+                if (!(error && error.message && error.message.startsWith('OpenRouteService routing failed: 404'))) {
+                    let context = '';
+                    if (info && (info.tripNumber || info.legDescription)) {
+                        context += `[Trip ${info.tripNumber || '?'}${info.legDescription ? ', Leg: ' + info.legDescription : ''}]\n`;
+                    }
+                    if (info && (info.originAddress || info.destAddress)) {
+                        context += `Origin: ${info.originAddress || JSON.stringify(origin)}\nDestination: ${info.destAddress || JSON.stringify(destination)}\n`;
+                    }
+                    console.warn(`${context}OpenRouteService routing error:`, error);
+                }
+                lastError = error;
+                // If this was a fetch/parse error, don't retry
+                break;
             }
-
-            const data = await response.json();
-            console.log('OpenRouteService response:', data);
-            
-            if (!data.routes || data.routes.length === 0) {
-                console.error('No routes in response:', data);
-                throw new Error('No route found');
-            }
-
-            const route = data.routes[0];
-            console.log('Route summary:', route.summary);
-            console.log('Raw distance:', route.summary.distance, 'Raw duration:', route.summary.duration);
-            
-            // Check if distance is already in km or needs conversion
-            let distance;
-            if (route.summary.distance > 1000) {
-                // Distance is in meters, convert to km
-                distance = route.summary.distance / 1000;
-            } else {
-                // Distance is already in km
-                distance = route.summary.distance;
-            }
-            
-            const duration = route.summary.duration / 60; // Convert seconds to minutes
-
-            return {
-                distance: Math.round(distance * 100) / 100,
-                duration: Math.round(duration * 100) / 100,
-                route: route.geometry ? route.geometry.coordinates : [origin, destination]
-            };
-        } catch (error) {
-            console.error('OpenRouteService routing error:', error);
-            
-            // Fallback: Calculate straight-line distance if API fails
-            console.log('Using fallback straight-line distance calculation');
-            const distance = this.calculateStraightLineDistance(origin, destination);
-            const duration = distance * 2; // Rough estimate: 2 minutes per km
-            
-            return {
-                distance: Math.round(distance * 100) / 100,
-                duration: Math.round(duration * 100) / 100,
-                route: [origin, destination],
-                fallback: true
-            };
         }
+        // Fallback: Calculate straight-line distance if all radii fail
+        const distance = this.calculateStraightLineDistance(origin, destination);
+        const duration = distance * 2;
+        return {
+            distance: Math.round(distance * 100) / 100,
+            duration: Math.round(duration * 100) / 100,
+            route: [origin, destination],
+            fallback: true
+        };
     }
 
     /**
@@ -636,8 +634,8 @@ class APIProviderManager {
     }
 
     // Calculate distance using current provider
-    async calculateDistance(origin, destination) {
-        return await this.getCurrentProvider().calculateDistance(origin, destination);
+    async calculateDistance(origin, destination, info = {}) {
+        return await this.getCurrentProvider().calculateDistance(origin, destination, info);
     }
 
     // Get current API key
