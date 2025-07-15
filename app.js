@@ -200,9 +200,36 @@ class DistanceCalculator {
             }
         });
 
-
-
-
+        // Select all on first click for all main input bars
+        const selectAllOnFirstClick = (input) => {
+            let hasSelected = false;
+            input.addEventListener('focus', function(e) {
+                if (!hasSelected) {
+                    input.select();
+                    hasSelected = true;
+                }
+            });
+            input.addEventListener('mousedown', function(e) {
+                if (!hasSelected) {
+                    e.preventDefault();
+                    input.focus();
+                    input.select();
+                    hasSelected = true;
+                }
+            });
+            input.addEventListener('blur', function() {
+                hasSelected = false;
+            });
+        };
+        // Apply to all main input bars
+        [
+            document.getElementById('homeAddress'),
+            document.getElementById('intermediateAddress'),
+            document.getElementById('pricePerKm'),
+            document.getElementById('apiKey')
+        ].forEach(input => {
+            if (input) selectAllOnFirstClick(input);
+        });
 
         // Load saved API keys
         this.loadAPIKeys();

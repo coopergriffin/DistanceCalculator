@@ -13,42 +13,7 @@
             <p>Calculate driving distances and reimbursement amounts for multiple client visits</p>
         </header>
 
-        <!-- API Configuration Section -->
-        <div class="api-section">
-            <h2>API Configuration</h2>
-            <div class="api-config">
-                <div class="provider-info" id="providerInfo">
-                    <strong>OpenRouteService + Nominatim</strong><br>
-                    Free driving distance calculation (OpenRouteService) with address lookup (Nominatim)<br>
-                    Free tier: 2,000 routing requests/day (OpenRouteService), unlimited geocoding (Nominatim)<br>
-                    Geocoding: Nominatim (free, CORS-friendly) | Routing: OpenRouteService (avoids tolls)
-                </div>
-
-                <div class="api-key-section">
-                    <label for="apiKey">API Key:</label>
-                    <div class="api-key-input-group">
-                        <input type="text" id="apiKey" placeholder="Enter your OpenRouteService API key">
-                        <button id="toggleApiKeyVisibility" class="secondary-btn" title="Show/Hide API key">👁️</button>
-                        <button id="clearApiKey" class="secondary-btn">Clear</button>
-                    </div>
-                    <small class="api-key-info">
-                        <strong>Demo mode:</strong> Most users do not need an API key. The app works out of the box for typical use. <br>
-                        <strong>When do you need an API key?</strong> Only if you plan to do thousands of requests per day, or if you see an error about exceeding the daily limit.<br>
-                        <a href="https://openrouteservice.org/dev/#/signup" target="_blank">Get your own free key</a> for unlimited usage (2,000 requests/day).
-                    </small>
-                </div>
-                <div id="rateLimitInfo" style="margin: 8px 0 0 0; display: none;"></div>
-
-                <div class="api-links">
-                    <p><strong>Get API Key (Free):</strong></p>
-                    <ul>
-                        <li><a href="https://openrouteservice.org/dev/#/signup" target="_blank">OpenRouteService (Free - 2,000 routing requests/day)</a></li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-
-        <!-- Main Content Section -->
+        <!-- Main Content Section (Address, Stops, Trips, Results) -->
         <div class="main-content">
             <div class="input-section">
                 <h2>Address Information</h2>
@@ -130,11 +95,10 @@
             <div id="results" class="results-section"></div>
         </div>
 
-        <!-- Help Section -->
+        <!-- Help Section (How to Use) -->
         <div class="help-section">
             <h2>How to Use</h2>
             <ol>
-                <li><strong>Get an API Key (optional for most users):</strong> You only need your own OpenRouteService API key if you plan to do thousands of requests per day, or if you see an error about exceeding the daily limit. For most users, the app works out of the box with the built-in demo key.</li>
                 <li><strong>Enter your home address:</strong> Start typing and select from the suggestions.</li>
                 <li><strong>Add stops (optional):</strong> Enter stop addresses and click "Add Stop" for each.</li>
                 <li><strong>Add trip:</strong> Click "Add Trip" to save the current trip. By default, trips return home. Check "Not returning home" if the trip ends at the last stop.</li>
@@ -143,7 +107,8 @@
                 <li><strong>Calculate:</strong> Click "Calculate Distances" to get distances and reimbursement amounts.<br>
                     <span style="color:#b26a00;font-size:0.98em;">If a driving route can’t be found, you’ll see a warning and the app will use a straight-line distance. You can try a more specific address, or enter the distance manually by clicking the “Add Manual Distance” button in the results table.</span>
                 </li>
-                <li><strong>Export:</strong> Download results as CSV for your records.</li>
+                <li><strong>Export:</strong> Download results as Excel for your records.</li>
+                <li><strong>API Key:</strong> <span style="color:#b26a00;">Enter your API key in the section below if you plan to do thousands of requests per day, or if you see an error about exceeding the daily limit. For most users, the app works out of the box with the built-in demo key.</span></li>
             </ol>
 
             <h3>Trip Workflow Example</h3>
@@ -176,6 +141,41 @@
                 <li><strong>Manual Edits:</strong> You can manually adjust distances in the results table if needed, <span style="color:#b26a00;">especially for fallback results</span>.</li>
                 <li><strong>Export:</strong> Download your results as a CSV for easy record-keeping.</li>
             </ul>
+        </div>
+
+        <!-- API Configuration Section (moved to bottom) -->
+        <div class="api-section">
+            <h2>API Configuration</h2>
+            <div class="api-config">
+                <div class="provider-info" id="providerInfo">
+                    <strong>OpenRouteService + Nominatim</strong><br>
+                    Free driving distance calculation (OpenRouteService) with address lookup (Nominatim)<br>
+                    Free tier: 2,000 routing requests/day (OpenRouteService), unlimited geocoding (Nominatim)<br>
+                    Geocoding: Nominatim (free, CORS-friendly) | Routing: OpenRouteService (avoids tolls)
+                </div>
+
+                <div class="api-key-section">
+                    <label for="apiKey">API Key:</label>
+                    <div class="api-key-input-group">
+                        <input type="text" id="apiKey" placeholder="Enter your OpenRouteService API key">
+                        <button id="toggleApiKeyVisibility" class="secondary-btn" title="Show/Hide API key">👁️</button>
+                        <button id="clearApiKey" class="secondary-btn">Clear</button>
+                    </div>
+                    <small class="api-key-info">
+                        <strong>Demo mode:</strong> Most users do not need an API key. The app works out of the box for typical use. <br>
+                        <strong>When do you need an API key?</strong> Only if you plan to do thousands of requests per day, or if you see an error about exceeding the daily limit.<br>
+                        <a href="https://openrouteservice.org/dev/#/signup" target="_blank">Get your own free key</a> for unlimited usage (2,000 requests/day).
+                    </small>
+                </div>
+                <div id="rateLimitInfo" style="margin: 8px 0 0 0; display: none;"></div>
+
+                <div class="api-links">
+                    <p><strong>Get API Key (Free):</strong></p>
+                    <ul>
+                        <li><a href="https://openrouteservice.org/dev/#/signup" target="_blank">OpenRouteService (Free - 2,000 routing requests/day)</a></li>
+                    </ul>
+                </div>
+            </div>
         </div>
     </div>
 
