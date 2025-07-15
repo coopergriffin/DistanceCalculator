@@ -1116,3 +1116,24 @@ header p {
     border: none;
     vertical-align: middle;
 } 
+
+.car-emoji {
+    display: inline-block;
+    transition: filter 0.2s;
+    cursor: pointer;
+    will-change: transform;
+}
+
+.car-emoji:hover {
+    animation: car-drive 0.7s cubic-bezier(.36,.07,.19,.97) both;
+    filter: drop-shadow(0 0 8px #3498db);
+}
+
+@keyframes car-drive {
+    0% { transform: translateX(0) scale(1) rotate(0deg);}
+    20% { transform: translateX(10px) scale(1.05) rotate(-3deg);}
+    40% { transform: translateX(20px) scale(1.1) rotate(2deg);}
+    60% { transform: translateX(10px) scale(1.05) rotate(-2deg);}
+    80% { transform: translateX(0) scale(1) rotate(0deg);}
+    100% { transform: translateX(0) scale(1) rotate(0deg);}
+} 

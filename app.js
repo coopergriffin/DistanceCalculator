@@ -1207,104 +1207,175 @@ class DistanceCalculator {
     }
 
     /**
-     * Export results to CSV
+     * Export results to Excel (XLSX) in full expense report template with enhanced formatting
      */
     exportResults() {
         const resultsContainer = document.getElementById('results');
         const table = resultsContainer.querySelector('table');
-        
         if (!table) {
             this.showError('No results to export. Please calculate distances first.');
             return;
         }
 
-        let csv = 'Trip,Leg,From,To,Distance (km),Duration (min),Reimbursement (CAD)\n';
-        
-        // Use current results if available (includes any manual edits)
+        // --- 1. Build the worksheet data (AOA) ---
+        const aoa = [];
+        // Title row (merged, bold, yellow)
+        aoa.push(['Toronto Blue Jays - Amateur Baseball Expenses 2025']);
+        // Name, Address, Period rows (all blank for user entry)
+        aoa.push(['Name:', '', '', '', '', '', '']);
+        aoa.push(['Address:', '', '', '', '', '', '']);
+        aoa.push(['Period From:', '', '', '', 'Period To:', '', '']);
+        // Header row for main table
+        aoa.push(['Date', 'City', 'Province', 'Description', 'KM', 'Hotels', '']);
+
+        // --- 2. Add trip legs as rows ---
+        let totalKM = 0;
+        let mainTableStart = aoa.length;
         if (this.currentResults) {
-            // Group results by trip for CSV export
+            // Group by trip, then by leg
             const tripGroups = {};
             this.currentResults.forEach(result => {
-                if (!tripGroups[result.tripNumber]) {
-                    tripGroups[result.tripNumber] = [];
-                }
+                if (!tripGroups[result.tripNumber]) tripGroups[result.tripNumber] = [];
                 tripGroups[result.tripNumber].push(result);
             });
-
             Object.keys(tripGroups).forEach(tripNumber => {
                 const tripResults = tripGroups[tripNumber];
-                
-                // Calculate trip totals
-                const tripTotalDistance = tripResults.reduce((sum, result) => sum + (result.error ? 0 : result.distance), 0);
-                const tripTotalDuration = tripResults.reduce((sum, result) => sum + (result.error ? 0 : result.duration), 0);
-                const tripTotalReimbursement = tripResults.reduce((sum, result) => sum + (result.error ? 0 : result.reimbursement), 0);
-                
-                tripResults.forEach((result, index) => {
-                    if (!result.error) {
-                        const from = result.from.replace(/"/g, '""');
-                        const to = result.to.replace(/"/g, '""');
-                        const distance = result.distance.toFixed(1);
-                        const duration = this.formatDuration(result.duration);
-                        const reimbursement = '$' + (result.distance * this.pricePerKm).toFixed(2);
-                        
-                        // Determine leg description
-                        let legDescription = '';
-                        if (index === 0) {
-                            legDescription = 'Home → First Stop';
-                        } else if (index === tripResults.length - 1) {
-                            legDescription = 'Last Stop → Home';
-                        } else {
-                            legDescription = `Stop ${index} → Stop ${index + 1}`;
-                        }
-                        
-                        csv += `"Trip ${tripNumber}","${legDescription}","${from}","${to}","${distance}","${duration}","${reimbursement}"\n`;
+                tripResults.forEach((result, idx) => {
+                    if (result.error) return; // skip error legs
+                    // Parse city/province from 'to' address
+                    let city = '', province = '';
+                    let toAddr = typeof result.to === 'object' && result.to.address ? result.to.address : result.to;
+                    const cityMatch = toAddr.match(/,\s*([^,]+),\s*([A-Z]{2})/);
+                    if (cityMatch) {
+                        city = cityMatch[1].trim();
+                        province = cityMatch[2].trim();
+                    } else {
+                        const provMatch = toAddr.match(/,\s*([A-Z]{2})/);
+                        if (provMatch) province = provMatch[1].trim();
                     }
+                    // Description: e.g., 'Home to Client', 'Client to Home', etc.
+                    let fromLabel = typeof result.from === 'object' && result.from.address ? result.from.address : result.from;
+                    let toLabel = typeof result.to === 'object' && result.to.address ? result.to.address : result.to;
+                    let desc = '';
+                    if (idx === 0) {
+                        desc = `Home to ${city || toLabel}`;
+                    } else if (idx === tripResults.length - 1) {
+                        desc = `${city || fromLabel} to Home`;
+                    } else {
+                        desc = `${fromLabel} to ${toLabel}`;
+                    }
+                    // Add row: Date, City, Province, Description, KM, Hotels, ''
+                    aoa.push(['', city, province, desc, result.distance ? result.distance.toFixed(1) : '', '', '']);
+                    totalKM += result.distance || 0;
                 });
-                
-                // Add trip total row
-                csv += `"Trip ${tripNumber}","Complete Trip Total","","","${tripTotalDistance.toFixed(1)}","${this.formatDuration(tripTotalDuration)}","$${tripTotalReimbursement.toFixed(2)}"\n`;
             });
-        } else {
-            // Fallback to table data
-            const rows = table.querySelectorAll('tbody tr');
-            rows.forEach(row => {
-                const cells = row.querySelectorAll('td');
-                if (cells.length >= 7) {
-                    const trip = cells[0].textContent.replace(/"/g, '""');
-                    const leg = cells[1].textContent.replace(/"/g, '""');
-                    const from = cells[2].textContent.replace(/"/g, '""');
-                    const to = cells[3].textContent.replace(/"/g, '""');
-                    const distance = cells[4].textContent;
-                    const duration = cells[5].textContent;
-                    const reimbursement = cells[6].textContent;
-                    
-                    csv += `"${trip}","${leg}","${from}","${to}","${distance}","${duration}","${reimbursement}"\n`;
+        }
+        let mainTableEnd = aoa.length - 1;
+        // --- 3. Totals row ---
+        aoa.push(['', '', '', 'TOTAL', totalKM ? totalKM.toFixed(1) : '', '$0.00', '']);
+        // --- 4. Cost per KM row ---
+        aoa.push(['', '', '', '', `${this.pricePerKm ? this.pricePerKm.toFixed(2) : ''}/km`, '', '']);
+        // --- 5. Blank row ---
+        aoa.push(['']);
+        // --- 6. Miscellaneous/Extra Sections (as in screenshot) ---
+        // Section: Miscellaneous
+        aoa.push(['Miscellaneous']);
+        aoa.push(['Date:', 'Taxi / Limos', 'Amount', 'Mileage', '752-1101-5301-7921-65010-000-000', '', '']);
+        aoa.push(['Date:', 'Parking / Tolls / Gas', 'Amount', 'Taxi/Limos', '752-1101-5301-7921-65010-000-000', '', '']);
+        aoa.push(['', 'Parking/Tolls', '752-1101-5301-7921-65010-000-000', '', '', '', '']);
+        aoa.push(['', 'Airfare/Cars', '752-1101-5301-7921-69050-000-000', '', '', '', '']);
+        aoa.push(['', 'Telephone', '752-1101-5301-7921-69050-000-000', '', '', '', '']);
+        aoa.push(['', 'Supplies', '752-1101-5301-7921-69140-000-000', '', '', '', '']);
+        aoa.push(['', 'Postage', '752-1101-5301-7921-67521-000-000', '', '', '', '']);
+        aoa.push(['', 'Misc.', '752-1101-5301-7921-73170-000-000', '', '', '', '']);
+        aoa.push(['', 'Total GST', '752-1101-0000-0000-04300-000-000', '', '', '', '']);
+        aoa.push(['Date:', 'Airfare / Car Rentals', 'Amount', 'Supplies', '752-1101-5301-7921-69140-000-000', '', '']);
+        aoa.push(['Date:', 'Telephone / Fax', 'Amount', 'Deductions', '', '', '']);
+        aoa.push(['CDN FUNDS TO REIMBURSE:']);
+        aoa.push(['Date:', 'Office Supplies / Copies', 'Amount', 'Submitted By:', '', '', '']);
+        aoa.push(['Date:', 'Miscellaneous', 'Amount', 'Approved By:', '', '', '']);
+        aoa.push(['', 'Postage', '', 'Approval Date:', '', '', '']);
+        aoa.push(['', '', '', 'Shipping Instructions', '', '', '']);
+        aoa.push(['TOTAL', '$0.00', 'Employee #', '####', '', '', '']);
+
+        // --- 7. Build worksheet and apply formatting ---
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        // Merge cells for title and some section headers
+        ws['!merges'] = [
+            { s: { r:0, c:0 }, e: { r:0, c:6 } }, // Title
+            { s: { r:13, c:0 }, e: { r:13, c:6 } }, // Miscellaneous
+            { s: { r:23, c:0 }, e: { r:23, c:6 } }, // CDN FUNDS TO REIMBURSE
+        ];
+        // Set column widths for readability
+        ws['!cols'] = [
+            { wch: 12 }, // Date
+            { wch: 18 }, // City
+            { wch: 12 }, // Province
+            { wch: 38 }, // Description
+            { wch: 10 }, // KM
+            { wch: 10 }, // Hotels
+            { wch: 10 }, // Extra
+        ];
+        // --- 8. Apply styles ---
+        const yellow = { fgColor: { rgb: 'FFFF00' } };
+        const center = { horizontal: 'center', vertical: 'center' };
+        const bold = { bold: true };
+        const font = { name: 'Calibri', sz: 12 };
+        const thickBorder = { style: 'thick', color: { rgb: '000000' } };
+        const thinBorder = { style: 'thin', color: { rgb: '000000' } };
+        // Helper to set style
+        function setStyle(cell, opts) {
+            if (ws[cell]) ws[cell].s = Object.assign({}, ws[cell].s||{}, opts);
+        }
+        // Title row
+        setStyle('A1', { font: { ...font, ...bold, sz: 16 }, fill: yellow, alignment: center, border: { top: thickBorder, left: thickBorder, right: thickBorder, bottom: thickBorder } });
+        // Name/Address/Period rows
+        ['A2','A3','A4','E4'].forEach(cell => setStyle(cell, { font: { ...font, ...bold }, fill: yellow, alignment: center, border: { top: thickBorder, left: thickBorder, right: thickBorder, bottom: thickBorder } }));
+        // Main table header
+        ['A5','B5','C5','D5','E5','F5'].forEach(cell => setStyle(cell, { font: { ...font, ...bold }, fill: yellow, alignment: center, border: { top: thickBorder, left: thickBorder, right: thickBorder, bottom: thickBorder } }));
+        // Main table body
+        for(let r=mainTableStart+1;r<=mainTableEnd;r++){
+            for(let c=0;c<=6;c++){
+                const cell = XLSX.utils.encode_cell({r,c});
+                // Hotels column and blank cells: yellow fill
+                if (c === 5 || (ws[cell] && ws[cell].v === '')) {
+                    setStyle(cell, { fill: yellow, alignment: center, font });
+                } else {
+                    setStyle(cell, { alignment: center, font });
                 }
-            });
+                // Borders
+                setStyle(cell, { border: { top: thinBorder, left: thinBorder, right: thinBorder, bottom: thinBorder } });
+            }
         }
-
-        // Add summary
-        const summary = resultsContainer.querySelector('.results-summary');
-        if (summary) {
-            // Use current totals if available (includes manual edits)
-            const totalDistance = this.currentTotalDistance ? this.currentTotalDistance.toFixed(1) : 
-                summary.textContent.match(/Total Route Distance:\s*([\d.]+)/)?.[1] || '0';
-            const totalReimbursement = this.currentTotalReimbursement ? this.currentTotalReimbursement.toFixed(2) : 
-                summary.textContent.match(/Total Reimbursement:\s*\$([\d.]+)/)?.[1] || '0';
-            csv += `\n"Total Route Distance (km)","${totalDistance}"\n`;
-            csv += `"Total Reimbursement (CAD)","$${totalReimbursement}"\n`;
+        // Totals row
+        const totalRow = mainTableEnd+1;
+        for(let c=0;c<=6;c++){
+            const cell = XLSX.utils.encode_cell({ r: totalRow, c });
+            setStyle(cell, { font: { ...font, ...bold }, fill: yellow, alignment: center, border: { top: thickBorder, left: thickBorder, right: thickBorder, bottom: thickBorder } });
         }
-
-        // Download CSV file
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `distance_calculator_results_${new Date().toISOString().split('T')[0]}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
+        // Cost per KM row
+        const costRow = totalRow+1;
+        for(let c=0;c<=6;c++){
+            const cell = XLSX.utils.encode_cell({ r: costRow, c });
+            setStyle(cell, { font, alignment: center, border: { top: thinBorder, left: thinBorder, right: thinBorder, bottom: thinBorder } });
+        }
+        // Section headers (Miscellaneous, CDN FUNDS TO REIMBURSE)
+        setStyle('A14', { font: { ...font, ...bold }, fill: yellow, alignment: center, border: { top: thickBorder, left: thickBorder, right: thickBorder, bottom: thickBorder } });
+        setStyle('A24', { font: { ...font, ...bold }, fill: yellow, alignment: center, border: { top: thickBorder, left: thickBorder, right: thickBorder, bottom: thickBorder } });
+        // Label cells in extra sections
+        ['A15','A16','A17','A18','A19','A20','A21','A22','A23','A25','A26','A28','A29','A31'].forEach(cell => setStyle(cell, { font: { ...font, ...bold }, fill: yellow, alignment: center, border: { top: thickBorder, left: thickBorder, right: thickBorder, bottom: thickBorder } }));
+        // All other cells in extra sections: center, font, thin border
+        for(let r=14;r<=31;r++){
+            for(let c=0;c<=6;c++){
+                const cell = XLSX.utils.encode_cell({r,c});
+                setStyle(cell, { alignment: center, font, border: { top: thinBorder, left: thinBorder, right: thinBorder, bottom: thinBorder } });
+            }
+        }
+        // --- 9. Export ---
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Expense Report');
+        const filename = `distance_expense_report_${new Date().toISOString().split('T')[0]}.xlsx`;
+        XLSX.writeFile(wb, filename);
     }
 
     /**
