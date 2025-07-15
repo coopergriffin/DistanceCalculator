@@ -984,7 +984,7 @@ class DistanceCalculator {
             <p><strong>Return Home:</strong> Yes</p>
             <h4>Trip Details:</h4>
             ${this.trips.map(trip => `
-                <p><strong>Trip ${trip.tripNumber}:</strong> Home → ${trip.stops.length > 0 ? trip.stops.join(' → ') + ' → ' : ''}${trip.notReturnHome ? 'End' : 'Home'}</p>
+                <p><strong>Trip ${trip.tripNumber}:</strong> Home → ${trip.stops.length > 0 ? trip.stops.map(stop => typeof stop === 'object' && stop.address ? stop.address : stop).join(' → ') + ' → ' : ''}${trip.notReturnHome ? 'End' : 'Home'}</p>
             `).join('')}
         `;
 
