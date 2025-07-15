@@ -254,11 +254,10 @@ class DistanceCalculator {
         };
 
         // Show dropdown with suggestions
-        const showDropdown = (suggestions) => {
+        const showDropdown = (suggestions, label) => {
             if (!dropdown) createDropdown();
             if (suggestions.length === 0) {
                 dropdown.style.display = 'none';
-                // Show error near the input
                 const errorDiv = input.parentNode.querySelector('.input-error') || document.createElement('div');
                 errorDiv.className = 'input-error';
                 errorDiv.style.color = '#b94a48';
@@ -267,16 +266,25 @@ class DistanceCalculator {
                 input.parentNode.appendChild(errorDiv);
                 return;
             }
-            // Remove any previous error
             const prevError = input.parentNode.querySelector('.input-error');
             if (prevError) prevError.remove();
             dropdown.innerHTML = '';
             dropdown.style.display = 'block';
             dropdown.style.zIndex = '9999';
+            if (label && label !== 'Exact Match') {
+                const labelDiv = document.createElement('div');
+                labelDiv.textContent = label;
+                labelDiv.style.fontWeight = 'bold';
+                labelDiv.style.color = '#856404';
+                labelDiv.style.background = '#fff3cd';
+                labelDiv.style.padding = '4px 8px';
+                labelDiv.style.borderBottom = '1px solid #ffeaa7';
+                dropdown.appendChild(labelDiv);
+            }
             suggestions.forEach((suggestion, index) => {
                 const item = document.createElement('div');
                 item.className = 'autocomplete-item';
-                item.textContent = suggestion.address;
+                item.textContent = suggestion.address + (suggestion.bestGuess ? ' (Best Guess)' : '');
                 item.style.cssText = `
                     padding: 8px 12px;
                     cursor: pointer;
@@ -289,13 +297,13 @@ class DistanceCalculator {
                     item.style.backgroundColor = 'white';
                 });
                 item.addEventListener('click', () => {
-                    // Set the input value and store coordinates as data attribute
                     input.value = suggestion.address;
                     input.dataset.coordinates = JSON.stringify(suggestion.coordinates);
                     dropdown.style.display = 'none';
-                    // Remove any previous error
                     const prevError = input.parentNode.querySelector('.input-error');
                     if (prevError) prevError.remove();
+                    const prevWarn = input.parentNode.querySelector('.input-warning');
+                    if (prevWarn) prevWarn.remove();
                 });
                 dropdown.appendChild(item);
             });
@@ -322,22 +330,95 @@ class DistanceCalculator {
         // Validate address function
         const validateAddress = async (address) => {
             showLoading(true);
+            let suggestions = [];
+            let tried = [];
+            let original = address;
             try {
-                // Get suggestions from Nominatim
-                const suggestions = await this.apiManager.geocodeAddress(address, 'CA');
-                
-                if (suggestions.length === 0) {
-                    this.showError('No addresses found. Please try adding more details (city, province, postal code).');
+                // 1. Try the original address
+                suggestions = await this.apiManager.geocodeAddress(address, 'CA');
+                tried.push(address);
+                // If found, return immediately
+                if (suggestions.length > 0) {
+                    showDropdown(suggestions, 'Exact Match');
+                    this.showInfo('Found suggestions. Click one to select.', input);
+                    return { isValid: true, message: 'Found suggestions. Click one to select.' };
+                }
+                // 2. Try just the postal code (if present)
+                const postalMatch = address.match(/[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d/);
+                if (postalMatch) {
+                    const postal = postalMatch[0];
+                    if (!tried.includes(postal)) {
+                        const postalResults = await this.apiManager.geocodeAddress(postal, 'CA');
+                        if (postalResults.length > 0) {
+                            suggestions = suggestions.concat(postalResults.map(s => ({...s, bestGuess: true})));
+                        }
+                        tried.push(postal);
+                    }
+                }
+                // 3. Try removing postal code
+                let noPostal = address.replace(/[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d/, '').replace(/,\s*$/, '').trim();
+                if (noPostal && noPostal !== address && !tried.includes(noPostal)) {
+                    const noPostalResults = await this.apiManager.geocodeAddress(noPostal, 'CA');
+                    if (noPostalResults.length > 0) {
+                        suggestions = suggestions.concat(noPostalResults.map(s => ({...s, bestGuess: true})));
+                    }
+                    tried.push(noPostal);
+                }
+                // 4. Try just street + city (drop province/postal)
+                const cityMatch = address.match(/,\s*([^,]+),\s*ON/);
+                if (cityMatch) {
+                    const streetCity = address.split(',')[0] + ',' + cityMatch[1];
+                    if (!tried.includes(streetCity)) {
+                        const streetCityResults = await this.apiManager.geocodeAddress(streetCity, 'CA');
+                        if (streetCityResults.length > 0) {
+                            suggestions = suggestions.concat(streetCityResults.map(s => ({...s, bestGuess: true})));
+                        }
+                        tried.push(streetCity);
+                    }
+                }
+                // 5. Try just city + province
+                const cityProvMatch = address.match(/,\s*([^,]+),\s*ON/);
+                if (cityProvMatch) {
+                    const cityProv = cityProvMatch[1] + ', ON';
+                    if (!tried.includes(cityProv)) {
+                        const cityProvResults = await this.apiManager.geocodeAddress(cityProv, 'CA');
+                        if (cityProvResults.length > 0) {
+                            suggestions = suggestions.concat(cityProvResults.map(s => ({...s, bestGuess: true})));
+                        }
+                        tried.push(cityProv);
+                    }
+                }
+                // 6. Try just the city
+                if (cityProvMatch) {
+                    const city = cityProvMatch[1];
+                    if (!tried.includes(city)) {
+                        const cityResults = await this.apiManager.geocodeAddress(city, 'CA');
+                        if (cityResults.length > 0) {
+                            suggestions = suggestions.concat(cityResults.map(s => ({...s, bestGuess: true})));
+                        }
+                        tried.push(city);
+                    }
+                }
+                // Remove duplicates by address string
+                const seen = new Set();
+                suggestions = suggestions.filter(s => {
+                    if (seen.has(s.address)) return false;
+                    seen.add(s.address);
+                    return true;
+                });
+                if (suggestions.length > 0) {
+                    showDropdown(suggestions, 'Best Guess');
+                    this.showWarning('No exact matches found, but here are some best guesses. Try alternate formats if needed.', input);
+                    this.showInfo('Tried: ' + tried.join(' | '), input);
+                    return { isValid: true, message: 'Best guess suggestions shown.' };
+                } else {
+                    // Show what was tried
+                    this.showError('No addresses found. Tried: ' + tried.join(' | ') + '. Try alternate formats or check for typos.', input);
                     return { isValid: false, message: 'No addresses found.' };
                 }
-
-                // Show suggestions in dropdown
-                showDropdown(suggestions);
-                
-                return { isValid: true, message: 'Found suggestions. Click one to select.' };
             } catch (error) {
                 console.error('Address verification error:', error);
-                this.showError('Address verification failed. Please try again.');
+                this.showError('Address verification failed. Please try again.', input);
                 return { isValid: false, message: error.message };
             } finally {
                 showLoading(false);
@@ -482,6 +563,7 @@ class DistanceCalculator {
         };
         
         this.trips.push(newTrip);
+        this.renumberTrips(); // Renumber trips after adding
         this.currentTripStops = []; // Reset for next trip
         this.notReturnHome = false; // Reset checkbox for next trip
         this.saveData();
@@ -503,7 +585,7 @@ class DistanceCalculator {
             } catch {}
         }
         if (!address) {
-            this.showError('Please enter a stop address.', input);
+            this.showWarning('Please enter a stop address.', input);
             return;
         }
         // Check for duplicate by address and coordinates
@@ -525,7 +607,7 @@ class DistanceCalculator {
                 finalAddress = validation.verifiedAddress || address;
                 finalCoordinates = validation.coordinates;
                 if (validation.warnings.length > 0) {
-                    this.showWarning(`Stop added successfully. Note: ${validation.warnings.join(', ')}`);
+                    this.showWarning(`Stop added successfully. Note: ${validation.warnings.join(', ')}`, input);
                 }
             } catch (error) {
                 console.error('Address validation error:', error);
@@ -541,7 +623,7 @@ class DistanceCalculator {
         this.updateUI();
         input.value = '';
         delete input.dataset.coordinates;
-        this.showWarning('Stop added successfully!');
+        this.showSuccess('Stop added successfully!', input);
     }
 
     /**
@@ -560,6 +642,7 @@ class DistanceCalculator {
      */
     removeTrip(index) {
         this.trips.splice(index, 1);
+        this.renumberTrips(); // Renumber trips after removing
         this.saveData();
         this.updateUI();
     }
@@ -644,14 +727,27 @@ class DistanceCalculator {
      * Show warning message
      * @param {string} message - Warning message to display
      */
-    showWarning(message) {
-        const errorDiv = document.getElementById('error');
-        errorDiv.innerHTML = `<div style="color: #856404; background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 4px;">${message}</div>`;
-        errorDiv.style.display = 'block';
-        
-        setTimeout(() => {
-            errorDiv.style.display = 'none';
-        }, 5000);
+    showWarning(message, input) {
+        if (input) {
+            let warnDiv = input.parentNode.querySelector('.input-warning') || document.createElement('div');
+            warnDiv.className = 'input-warning';
+            warnDiv.style.color = '#856404';
+            warnDiv.style.background = '#fff3cd';
+            warnDiv.style.border = '1px solid #ffeaa7';
+            warnDiv.style.padding = '8px';
+            warnDiv.style.marginTop = '4px';
+            warnDiv.style.borderRadius = '4px';
+            warnDiv.style.display = 'flex';
+            warnDiv.style.alignItems = 'center';
+            warnDiv.innerHTML = `<span style='font-size:1.2em;margin-right:6px;'>⚠️</span> ${message}`;
+            input.parentNode.appendChild(warnDiv);
+            setTimeout(() => { if (warnDiv.parentNode) warnDiv.parentNode.removeChild(warnDiv); }, 4000);
+        } else {
+            const errorDiv = document.getElementById('error');
+            errorDiv.innerHTML = `<div style="color: #856404; background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 4px;"><span style='font-size:1.2em;margin-right:6px;'>⚠️</span> ${message}</div>`;
+            errorDiv.style.display = 'block';
+            setTimeout(() => { errorDiv.style.display = 'none'; }, 4000);
+        }
     }
 
     /**
@@ -927,8 +1023,8 @@ class DistanceCalculator {
                             <tr class="${result.error ? 'error-row' : ''} ${index === 0 ? 'trip-start' : ''}" data-index="${results.indexOf(result)}" data-trip="${result.tripNumber}">
                                 <td>${index === 0 ? `<strong>Trip ${result.tripNumber}</strong>` : ''}</td>
                                 <td>${legDescription}</td>
-                                <td>${result.from}</td>
-                                <td>${result.to}</td>
+                                <td>${typeof result.from === 'object' && result.from.address ? result.from.address : result.from}</td>
+                                <td>${typeof result.to === 'object' && result.to.address ? result.to.address : result.to}</td>
                                 <td>
                                     ${isEditable ? 
                                         `<input type="number" class="distance-input" value="${result.distance.toFixed(1)}" step="0.1" min="0" data-index="${results.indexOf(result)}">` : 
@@ -1206,7 +1302,7 @@ class DistanceCalculator {
             input.parentNode.appendChild(errorDiv);
         } else {
             const errorDiv = document.getElementById('error');
-            errorDiv.innerHTML = `<div style="color: #b94a48; background: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">${message}</div>`;
+            errorDiv.innerHTML = `<div style="color: #b94a48; background: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;"><span style='font-size:1.2em;margin-right:6px;'>❗</span> ${message}</div>`;
             errorDiv.style.display = 'block';
             setTimeout(() => {
                 errorDiv.style.display = 'none';
@@ -1280,10 +1376,10 @@ class DistanceCalculator {
                 </div>
                 <div class="trip-details">
                     <div class="trip-stops">
-                        <strong>Stops:</strong> ${trip.stops.length > 0 ? trip.stops.join(' → ') : 'None'}
+                        <strong>Stops:</strong> ${trip.stops.length > 0 ? trip.stops.map(stop => typeof stop === 'object' && stop.address ? stop.address : stop).join(', ') : 'None'}
                     </div>
                     <div class="trip-route">
-                        <strong>Route:</strong> Home → ${trip.stops.length > 0 ? trip.stops.join(' → ') + ' → ' : ''}${trip.notReturnHome ? 'End' : 'Home'}
+                        <strong>Route:</strong> Home → ${trip.stops.length > 0 ? trip.stops.map(stop => typeof stop === 'object' && stop.address ? stop.address : stop).join(' → ') + ' → ' : ''}${trip.notReturnHome ? 'End' : 'Home'}
                     </div>
                 </div>
             `;
@@ -1544,6 +1640,13 @@ class DistanceCalculator {
                 totalReimbursementElement.textContent = '$' + this.currentTotalReimbursement.toFixed(2);
             }
         }
+    }
+
+    // Add a function to renumber all trips
+    renumberTrips() {
+        this.trips.forEach((trip, idx) => {
+            trip.tripNumber = idx + 1;
+        });
     }
 }
 
