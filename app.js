@@ -1259,42 +1259,69 @@ class DistanceCalculator {
         let totalKM = 0;
         let mainTableStart = aoa.length;
         if (this.currentResults) {
-            // Group by trip, then by leg
-            const tripGroups = {};
+            // Helper to shorten address for user-friendly display
+            function shortenAddress(addr) {
+                if (!addr) return '';
+                // If it's an object with .address, use that
+                if (typeof addr === 'object' && addr.address) addr = addr.address;
+                // Try to extract landmark/business/park name (before first comma, if not a street address)
+                const landmarkMatch = addr.match(/^([^,\d]+),\s*([^,]+),\s*([A-Z]{2})/);
+                if (landmarkMatch) {
+                    // e.g., 'Stan Wadlow Field, East York, ON' => 'Stan Wadlow Field, East York'
+                    return landmarkMatch[1].trim() + ', ' + landmarkMatch[2].trim();
+                }
+                // Try to extract street number and name + city
+                const streetCityMatch = addr.match(/^(\d+\s+[A-Za-z0-9 .'-]+),\s*([^,]+),\s*([A-Z]{2})/);
+                if (streetCityMatch) {
+                    // e.g., '50 Wellesley Street, Toronto, ON' => '50 Wellesley Street, Toronto'
+                    return streetCityMatch[1].trim() + ', ' + streetCityMatch[2].trim();
+                }
+                // Try to extract just city, province
+                const cityProvMatch = addr.match(/,\s*([^,]+),\s*([A-Z]{2})/);
+                if (cityProvMatch) {
+                    return cityProvMatch[1].trim() + ', ' + cityProvMatch[2].trim();
+                }
+                // If it's a postal code
+                const postalMatch = addr.match(/[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d/);
+                if (postalMatch) {
+                    // e.g., 'M5V 3A8, Toronto, ON' => 'M5V 3A8, Toronto'
+                    const cityMatch = addr.match(/,\s*([^,]+),/);
+                    return postalMatch[0] + (cityMatch ? ', ' + cityMatch[1].trim() : '');
+                }
+                // Fallback: use first part before comma
+                return addr.split(',')[0];
+            }
+            // Helper to compare addresses (ignoring case and whitespace)
+            function isHomeAddress(addr, homeAddr) {
+                if (!addr || !homeAddr) return false;
+                if (typeof addr === 'object' && addr.address) addr = addr.address;
+                return addr.replace(/\s+/g, '').toLowerCase() === homeAddr.replace(/\s+/g, '').toLowerCase();
+            }
+            const homeShort = 'Home';
             this.currentResults.forEach(result => {
-                if (!tripGroups[result.tripNumber]) tripGroups[result.tripNumber] = [];
-                tripGroups[result.tripNumber].push(result);
-            });
-            Object.keys(tripGroups).forEach(tripNumber => {
-                const tripResults = tripGroups[tripNumber];
-                tripResults.forEach((result, idx) => {
-                    if (result.error) return; // skip error legs
-                    // Parse city/province from 'to' address
-                    let city = '', province = '';
-                    let toAddr = typeof result.to === 'object' && result.to.address ? result.to.address : result.to;
-                    const cityMatch = toAddr.match(/,\s*([^,]+),\s*([A-Z]{2})/);
-                    if (cityMatch) {
-                        city = cityMatch[1].trim();
-                        province = cityMatch[2].trim();
-                    } else {
-                        const provMatch = toAddr.match(/,\s*([A-Z]{2})/);
-                        if (provMatch) province = provMatch[1].trim();
-                    }
-                    // Description: e.g., 'Home to Client', 'Client to Home', etc.
-                    let fromLabel = typeof result.from === 'object' && result.from.address ? result.from.address : result.from;
-                    let toLabel = typeof result.to === 'object' && result.to.address ? result.to.address : result.to;
-                    let desc = '';
-                    if (idx === 0) {
-                        desc = `Home to ${city || toLabel}`;
-                    } else if (idx === tripResults.length - 1) {
-                        desc = `${city || fromLabel} to Home`;
-                    } else {
-                        desc = `${fromLabel} to ${toLabel}`;
-                    }
-                    // Add row: Date, City, Province, Description, KM, Hotels, ''
-                    aoa.push(['', city, province, desc, result.distance ? result.distance.toFixed(1) : '', '', '']);
-                    totalKM += result.distance || 0;
-                });
+                // Parse city/province from 'to' address
+                let city = '', province = '';
+                let toAddr = typeof result.to === 'object' && result.to.address ? result.to.address : result.to;
+                const cityMatch = toAddr.match(/,\s*([^,]+),\s*([A-Z]{2})/);
+                if (cityMatch) {
+                    city = cityMatch[1].trim();
+                    province = cityMatch[2].trim();
+                } else {
+                    const provMatch = toAddr.match(/,\s*([A-Z]{2})/);
+                    if (provMatch) province = provMatch[1].trim();
+                }
+                // Description: always 'from to to', but with 'Home' for home address
+                let fromLabel = isHomeAddress(result.from, this.homeAddress) ? homeShort : shortenAddress(result.from);
+                let toLabel = isHomeAddress(result.to, this.homeAddress) ? homeShort : shortenAddress(result.to);
+                let desc = '';
+                if (result.error) {
+                    desc = `Could not calculate: ${result.error}`;
+                } else {
+                    desc = `${fromLabel} to ${toLabel}`;
+                }
+                // Add row: Date, City, Province, Description, KM, Hotels, ''
+                aoa.push(['', city, province, desc, result.error ? '' : (result.distance ? result.distance.toFixed(1) : ''), '', '']);
+                if (!result.error) totalKM += result.distance || 0;
             });
         }
         let mainTableEnd = aoa.length - 1;
@@ -1306,6 +1333,7 @@ class DistanceCalculator {
         aoa.push(['']);
         // --- 6. Miscellaneous/Extra Sections (as in screenshot) ---
         // Section: Miscellaneous
+        const miscHeaderRow = aoa.length;
         aoa.push(['Miscellaneous']);
         aoa.push(['Date:', 'Taxi / Limos', 'Amount', 'Mileage', '752-1101-5301-7921-65010-000-000', '', '']);
         aoa.push(['Date:', 'Parking / Tolls / Gas', 'Amount', 'Taxi/Limos', '752-1101-5301-7921-65010-000-000', '', '']);
@@ -1318,6 +1346,7 @@ class DistanceCalculator {
         aoa.push(['', 'Total GST', '752-1101-0000-0000-04300-000-000', '', '', '', '']);
         aoa.push(['Date:', 'Airfare / Car Rentals', 'Amount', 'Supplies', '752-1101-5301-7921-69140-000-000', '', '']);
         aoa.push(['Date:', 'Telephone / Fax', 'Amount', 'Deductions', '', '', '']);
+        const fundsHeaderRow = aoa.length;
         aoa.push(['CDN FUNDS TO REIMBURSE:']);
         aoa.push(['Date:', 'Office Supplies / Copies', 'Amount', 'Submitted By:', '', '', '']);
         aoa.push(['Date:', 'Miscellaneous', 'Amount', 'Approved By:', '', '', '']);
@@ -1327,11 +1356,11 @@ class DistanceCalculator {
 
         // --- 7. Build worksheet and apply formatting ---
         const ws = XLSX.utils.aoa_to_sheet(aoa);
-        // Merge cells for title and some section headers
+        // Merge cells for title and section headers (dynamically)
         ws['!merges'] = [
             { s: { r:0, c:0 }, e: { r:0, c:6 } }, // Title
-            { s: { r:13, c:0 }, e: { r:13, c:6 } }, // Miscellaneous
-            { s: { r:23, c:0 }, e: { r:23, c:6 } }, // CDN FUNDS TO REIMBURSE
+            { s: { r:miscHeaderRow, c:0 }, e: { r:miscHeaderRow, c:6 } }, // Miscellaneous
+            { s: { r:fundsHeaderRow, c:0 }, e: { r:fundsHeaderRow, c:6 } }, // CDN FUNDS TO REIMBURSE
         ];
         // Set column widths for readability
         ws['!cols'] = [
@@ -1555,10 +1584,7 @@ class DistanceCalculator {
     updateUI() {
         document.getElementById('homeAddress').value = this.homeAddress;
         document.getElementById('pricePerKm').value = this.pricePerKm.toFixed(2);
-
-
-
-
+        document.getElementById('intermediateAddress').value = '';
 
         // Update provider selection
         const providerSelect = document.getElementById('providerSelect');
